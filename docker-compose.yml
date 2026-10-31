@@ -8,7 +8,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:${PORT:-7860}:7860"
+      - "${PORT:-7860}:7860"
     environment:
       - OLLAMA_HOST=${OLLAMA_HOST_DOCKER:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
@@ -27,7 +27,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.frontend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
       - VITE_API_PROXY_TARGET=http://backend:7860
     depends_on:
