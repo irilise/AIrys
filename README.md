@@ -121,7 +121,11 @@ docker compose up --build
 ```
 
 Open `http://localhost:3000`. The frontend development server proxies API
-requests to the backend container; Ollama remains on the host.
+requests to the backend container. Ollama remains on the host and is reached
+through `host.docker.internal`; set `OLLAMA_HOST_DOCKER` if it is listening at
+a different host URL. This container-specific variable avoids using
+`localhost` inside the backend container, where it would refer to the
+container itself.
 
 ## Configuration and local data
 

@@ -10,10 +10,12 @@ services:
     ports:
       - "${PORT:-7860}:7860"
     environment:
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_HOST=${OLLAMA_HOST_DOCKER:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
       - HOST=0.0.0.0
       - PORT=7860
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
       - ./backend:/app/backend
