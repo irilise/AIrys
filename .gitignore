@@ -142,6 +142,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.local
 .venv
 env/
 venv/
@@ -185,3 +186,30 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# AIrys-specific additions
+
+# Environment variables (contains sensitive config)
+.env
+.env.local
+
+# Data directories - DO NOT COMMIT USER DATA!
+data/
+!.gitignore
+
+# Docker builds
+docker-compose.override.yml
+
+# Temporary files and OS artifacts
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Node (frontend) - DO NOT commit node_modules!
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/package-lock.json
+frontend/yarn.lock

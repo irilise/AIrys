@@ -1,0 +1,42 @@
+# AIrys - Cross-platform Personal AI Assistant
+# Docker Compose Configuration (Optional)
+
+services:
+  # Backend Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      bash -c "pip install -r requirements.txt && 
+                python backend/server.py"
+    ports:
+      - "${PORT:-7860}:7860"
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - HOST=0.0.0.0
+      - PORT=7860
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app/backend
+    restart: unless-stopped
+
+  # Frontend Development (only for dev)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    command: npm run dev
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - VITE_API_URL=http://localhost:${PORT:-7860}
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  airys_data:
