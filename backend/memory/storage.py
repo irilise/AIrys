@@ -5,6 +5,7 @@ Handles persistent storage of conversations and memories using JSON files
 import os
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
 from datetime import datetime
@@ -16,10 +17,8 @@ class FileStorage:
     """
     File-based storage system for AIrys.
     
-    Organizes data into separate directories:
-    - conversations/: Stores conversation histories per session
-    - memories/: Stores memory metadata (not the actual content - that's in vector DB)
-    - user_data/: Stores structured user data (tasks, preferences, etc.)
+    Stores conversation histories and memory metadata/content in JSON files.
+    ChromaDB stores the memory vectors separately.
     """
     
     def __init__(self, conversations_dir: str, data_dir: str):
@@ -34,6 +33,7 @@ class FileStorage:
         self.conversations_dir = Path(conversations_dir)
         
         # Create directories if they don't exist
+        self.data_root.mkdir(parents=True, exist_ok=True)
         self.conversations_dir.mkdir(parents=True, exist_ok=True)
         
         # Memory metadata storage (lightweight JSON tracking)
@@ -45,10 +45,11 @@ class FileStorage:
         """Create memories metadata file if it doesn't exist."""
         metadata_file = self.conversations_dir / "memories_metadata.json"
         if not metadata_file.exists():
-            metadata_file.write_json(
-                {"memories": {}},
-                indent=2
-            )
+            self._write_json(metadata_file, {"memories": {}})
+
+    @staticmethod
+    def _write_json(path: Path, data: Dict[str, Any]):
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     
     def save_conversation(self, key: str, message: str, response: str, 
                          context: Optional[str] = None):
@@ -64,13 +65,13 @@ class FileStorage:
         try:
             # Get or create conversation file
             conv_file = self.conversations_dir / f"{key}.json"
-            
+
             if not conv_file.exists():
                 data = {
                     "sessions": []
                 }
             else:
-                data = json.loads(conv_file.read_text())
+                data = json.loads(conv_file.read_text(encoding="utf-8"))
             
             # Create session entry
             timestamp = datetime.now().isoformat()
@@ -92,7 +93,7 @@ class FileStorage:
                 }
             
             data["sessions"].append(session_entry)
-            conv_file.write_json(data, indent=2)
+            self._write_json(conv_file, data)
             
             logger.debug(f"Saved conversation {key}: '{message[:50]}...'")
             
@@ -116,16 +117,28 @@ class FileStorage:
             if not conv_file.exists():
                 return None
             
-            data = json.loads(conv_file.read_text())
+            data = json.loads(conv_file.read_text(encoding="utf-8"))
             return {"sessions": data.get("sessions", [])}
-            
+
         except Exception as e:
             logger.error(f"Error loading conversation {key}: {e}")
-            return None
+            raise
 
-    def save_memory(self, memory_id: str, content: str, category: Optional[str] = None):
+    def clear_conversation(self, key: str):
+        """Remove the saved exchanges for a conversation."""
+        conversation_file = self.conversations_dir / f"{key}.json"
+        if conversation_file.exists():
+            conversation_file.unlink()
+
+    def save_memory(
+        self,
+        memory_id: str,
+        content: str,
+        category: Optional[str] = None,
+        created_at: Optional[float] = None,
+    ):
         """
-        Save metadata for a memory (tracking only - actual content is in vector DB).
+        Save the local content and metadata record for a memory.
         
         Args:
             memory_id: The unique identifier for the memory
@@ -137,19 +150,20 @@ class FileStorage:
             
             # Load existing metadata
             metadata_file = self.conversations_dir / "memories_metadata.json"
-            data = json.loads(metadata_file.read_text())
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
             
             # Add or update memory tracking
             data["memories"][memory_id] = {
                 "content": content,
                 "category": category,
-                "created_at": __import__('time').time()
+                "created_at": created_at if created_at is not None else time.time(),
             }
             
-            metadata_file.write_json(data, indent=2)
+            self._write_json(metadata_file, data)
             
         except Exception as e:
             logger.error(f"Error saving memory metadata: {e}")
+            raise
     
     def update_memory(self, memory_id: str, updates: Dict[str, Any]):
         """
@@ -163,14 +177,15 @@ class FileStorage:
             self._ensure_memories_metadata()
             
             metadata_file = self.conversations_dir / "memories_metadata.json"
-            data = json.loads(metadata_file.read_text())
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
             
             if memory_id in data["memories"]:
                 data["memories"][memory_id].update(updates)
-                metadata_file.write_json(data, indent=2)
+                self._write_json(metadata_file, data)
             
         except Exception as e:
             logger.error(f"Error updating memory: {e}")
+            raise
     
     def get_memory(self, memory_id: str) -> Tuple[Optional[str], Optional[Dict]]:
         """
@@ -198,7 +213,7 @@ class FileStorage:
         
         except Exception as e:
             logger.error(f"Error getting memory {memory_id}: {e}")
-            return (None, None)
+            raise
     
     def get_memory_ids_by_category(self, category: str) -> list:
         """
@@ -214,7 +229,7 @@ class FileStorage:
             self._ensure_memories_metadata()
             
             metadata_file = self.conversations_dir / "memories_metadata.json"
-            data = json.loads(metadata_file.read_text())
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
             
             return [
                 mem_id for mem_id, meta in data["memories"].items()
@@ -223,7 +238,33 @@ class FileStorage:
         
         except Exception as e:
             logger.error(f"Error getting memory IDs by category: {e}")
-            return []
+            raise
+
+    def get_all_memory_ids(self) -> list:
+        """Return all memory IDs in insertion order."""
+        try:
+            self._ensure_memories_metadata()
+            metadata_file = self.conversations_dir / "memories_metadata.json"
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
+            return list(data["memories"])
+        except Exception as e:
+            logger.error(f"Error getting all memory IDs: {e}")
+            raise
+
+    def get_memory_categories(self) -> list:
+        """Return unique memory categories in alphabetical order."""
+        try:
+            self._ensure_memories_metadata()
+            metadata_file = self.conversations_dir / "memories_metadata.json"
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
+            return sorted({
+                metadata["category"]
+                for metadata in data["memories"].values()
+                if metadata.get("category")
+            })
+        except Exception as e:
+            logger.error(f"Error getting memory categories: {e}")
+            raise
     
     def clear_all_memories(self):
         """
@@ -235,14 +276,15 @@ class FileStorage:
             self._ensure_memories_metadata()
             
             metadata_file = self.conversations_dir / "memories_metadata.json"
-            data = json.loads(metadata_file.read_text())
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
             
             # Clear all memory IDs
             data["memories"] = {}
-            metadata_file.write_json(data, indent=2)
+            self._write_json(metadata_file, data)
         
         except Exception as e:
             logger.error(f"Error clearing all memories: {e}")
+            raise
     
     def delete_memory(self, memory_id: str):
         """
@@ -256,14 +298,15 @@ class FileStorage:
             self._ensure_memories_metadata()
             
             metadata_file = self.conversations_dir / "memories_metadata.json"
-            data = json.loads(metadata_file.read_text())
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
             
             if memory_id in data["memories"]:
                 del data["memories"][memory_id]
-                metadata_file.write_json(data, indent=2)
+                self._write_json(metadata_file, data)
                 
         except Exception as e:
             logger.error(f"Error deleting memory {memory_id}: {e}")
+            raise
     
     def get_all_conversations(self) -> Dict[str, Any]:
         """
@@ -277,7 +320,7 @@ class FileStorage:
             
             for conv_file in self.conversations_dir.glob("*.json"):
                 if conv_file.name != "memories_metadata.json":
-                    data = json.loads(conv_file.read_text())
+                    data = json.loads(conv_file.read_text(encoding="utf-8"))
                     key = conv_file.stem
                     conversations[key] = data
             
@@ -285,4 +328,4 @@ class FileStorage:
             
         except Exception as e:
             logger.error(f"Error loading all conversations: {e}")
-            return {}
+            raise
