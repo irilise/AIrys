@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom dark theme overrides */
+@layer base {
+  * {
+    @apply m-0 p-0 box-border;
+  }
+
+  html {
+    @apply text-base antialiased;
+  }
+
+  body {
+    @apply bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 text-gray-100;
+  }
+}
+
+@layer components {
+  .app-container {
+    @apply min-h-screen flex flex-col;
+  }
+
+  .app-header {
+    @apply flex justify-between items-center px-6 py-4
+           bg-black/30 backdrop-blur-sm border-b border-white/10;
+  }
+
+  .server-status {
+    @apply text-xs px-3 py-1 rounded-full font-medium;
+  }
+
+  .server-status.connected {
+    @apply bg-emerald-500 text-slate-900;
+  }
+
+  .server-status.disconnected {
+    @apply bg-red-500 text-white;
+  }
+
+  button {
+    @apply px-4 py-2 rounded-lg border-none cursor-pointer text-sm
+           transition-all duration-200 hover:-translate-y-0.5;
+  }
+
+  .primary-button {
+    @apply bg-gradient-to-r from-primary-500 to-primary-600 text-white font-bold;
+  }
+
+  .chat-container {
+    @apply flex flex-col flex-1
+           bg-black/20 backdrop-blur-sm rounded-xl overflow-hidden shadow-2xl;
+  }
+
+  .chat-messages {
+    @apply flex-1 overflow-y-auto px-4 py-4 gap-3;
+    @apply scrollbar-thin scrollbar-thumb-purple-500/50 scrollbar-track-transparent;
+  }
+
+  .message {
+    @apply flex items-start gap-2 p-3 rounded-xl;
+  }
+
+  .message.user {
+    @apply flex-row-reverse bg-primary-600/40;
+  }
+
+  .message-content {
+    @apply flex-1 text-base leading-relaxed break-words;
+  }
+
+  .chat-input-area {
+    @apply flex items-center gap-2 px-4 py-3
+           bg-black/30 border-t border-white/10;
+  }
+
+  .chat-input-area textarea {
+    @apply flex-1 min-h-[80px] max-h-[150px]
+           px-4 py-3 rounded-lg
+           bg-white/5 border border-white/20 text-gray-100
+           focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30
+           resize-none transition-all duration-200;
+  }
+
+  .memory-panel {
+    @apply h-[28rem] bg-black/20 backdrop-blur-sm rounded-xl p-4 mb-4 overflow-hidden;
+  }
+
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/70 flex items-center justify-center z-50;
+  }
+
+  .settings-modal {
+    @apply w-[90vw] max-w-lg rounded-xl p-6 bg-slate-900 shadow-2xl
+           overflow-y-auto max-h-[80vh];
+  }
+
+  input[type="text"],
+  input[type="number"] {
+    @apply w-full px-3 py-2 mt-1
+           bg-white/5 border border-white/20 rounded-lg text-gray-100
+           focus:outline-none focus:border-primary-500;
+  }
+
+  label {
+    @apply block text-sm text-purple-200 mb-1;
+  }
+}
+
+@layer utilities {
+  .gradient-text {
+    background: linear-gradient(90deg, #e94560, #ff6b6b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
