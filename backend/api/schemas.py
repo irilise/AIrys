@@ -14,6 +14,10 @@ class ChatRequest(BaseModel):
         "You are AIrys, a friendly and helpful personal assistant. Be conversational, practical, and supportive.",
         description="System prompt to guide the AI's behavior"
     )
+    persist_history: bool = Field(
+        default=True,
+        description="Whether to save this exchange to the local conversation history",
+    )
 
 
 class ChatResponse(BaseModel):

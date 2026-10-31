@@ -144,6 +144,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             history_response = await self.client.get("/api/v1/chat/history")
             self.assertEqual(len(history_response.json()["sessions"]), 2)
 
+            one_shot = await self.client.post(
+                "/api/v1/chat/complete",
+                json={"message": "Do not retain this smoke check.", "persist_history": False},
+            )
+            self.assertEqual(one_shot.status_code, 200)
+
         history = self.storage.get_conversation("active_session")
         self.assertEqual(len(history["sessions"]), 2)
 

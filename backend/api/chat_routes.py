@@ -73,12 +73,13 @@ async def complete_chat(request: ChatRequest):
         if not ai_response:
             raise HTTPException(status_code=502, detail="Ollama returned an empty response.")
 
-        file_storage.save_conversation(
-            key="active_session",
-            message=request.message,
-            response=ai_response,
-            context="\n".join(context_parts) or None,
-        )
+        if request.persist_history:
+            file_storage.save_conversation(
+                key="active_session",
+                message=request.message,
+                response=ai_response,
+                context="\n".join(context_parts) or None,
+            )
         return ChatResponse(
             response=ai_response,
             tokens_used=result.get("eval_count"),

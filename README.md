@@ -127,6 +127,26 @@ a different host URL. This container-specific variable avoids using
 `localhost` inside the backend container, where it would refer to the
 container itself.
 
+With the services running, verify the frontend and backend independently
+or run the end-to-end Ollama chat check:
+
+```sh
+make smoke-frontend
+make smoke-backend
+make smoke-integration
+# Or run all three checks:
+make smoke-test
+```
+
+The integration check uses the configured chat model if it is installed in
+the local Ollama server; otherwise it selects another installed chat model.
+If Ollama has no chat model, it downloads `llama3.2:1b` (override with
+`OLLAMA_TEST_MODEL`). During the chat check, the backend's model setting is
+temporarily switched if needed and restored afterward. The smoke-test chat
+exchange is not added to saved history. Set `AIRYS_FRONTEND_URL`,
+`AIRYS_BACKEND_URL`, or `OLLAMA_TEST_HOST` to target services at non-default
+URLs; use `OLLAMA_TEST_TIMEOUT` to adjust the model download timeout.
+
 ## Configuration and local data
 
 Settings are loaded from environment variables and, when present, `.env`.
@@ -178,8 +198,10 @@ The API is versioned under `/api/v1`:
 | `DELETE` | `/api/v1/memory/clear-all` | Delete all memories |
 
 Chat requests accept a `message` and optional `context` and `system_prompt`.
-Chat generation is non-streaming. Memory writes accept JSON, while the
-previous `memory_content` query parameter remains supported for compatibility.
+Chat generation is non-streaming. Set `persist_history` to `false` for a
+one-off response that is not added to local conversation history. Memory writes
+accept JSON, while the previous `memory_content` query parameter remains
+supported for compatibility.
 
 ## Development commands
 
