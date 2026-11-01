@@ -3,6 +3,7 @@ ChromaDB Vector Database Wrapper
 Provides semantic search and vector embedding capabilities
 """
 import logging
+from functools import lru_cache
 from typing import List, Optional, Dict, Any
 import chromadb
 import numpy as np
@@ -38,7 +39,7 @@ class VectorDatabase:
         # Metadata schema: {category, created_at}
         self.collection = self.client.get_or_create_collection(
             name="memories",
-            metadata={"category": {"dtype": "str"}, "created_at": {"dtype": "float"}}
+            metadata={"hnsw:space": "l2"},
         )
         
         logger.info(f"Vector database initialized at {persist_directory}")
@@ -55,65 +56,61 @@ class VectorDatabase:
         Returns:
             List of floats representing the embedding vector
         """
-        # Check for Ollama embedding API
-        from config.app_config import settings
-        ollama_host = settings.OLLAMA_HOST.replace("http://", "").replace("https://", "")
-        
-        try:
-            import httpx
-            ollama_port = ollama_host.split(":")[1] if ":" in ollama_host else "11434"
-            
-            # Try Ollama embedding API first (if available)
-            response = httpx.get(
-                f"http://{settings.OLLAMA_HOST}/api/embeddings",
-                json={"model": settings.OLLAMA_MODEL, "prompt": text},
-                timeout=30.0
-            )
-            
-            if response.status_code == 200:
+        from config.app_config import get_runtime_config, settings
+        import httpx
+
+        if settings.EMBEDDING_MODEL:
+            try:
+                config = get_runtime_config()
+                response = httpx.post(
+                    f"{config.ollama_host}/api/embed",
+                    json={"model": settings.EMBEDDING_MODEL, "input": text},
+                    timeout=30.0,
+                )
+                response.raise_for_status()
                 result = response.json()
-                # Ollama returns {"embedding": [...]} by default
-                embedding = result.get("embedding", [])
-                
-                # Normalize to -1 to 1 range (ChromaDB expects this)
-                import numpy as np
+                embeddings = result.get("embeddings")
+                embedding = embeddings[0] if embeddings else result.get("embedding")
                 if embedding:
-                    min_val = min(embedding)
-                    max_val = max(embedding)
-                    range_val = max_val - min_val
-                    normalized = [(x - min_val) / range_val * 2 - 1 if range_val > 0 else 0 for x in embedding]
-                    return list(normalized)
-                return [0.0] * 768  # Default to zero vector if no embedding returned
-                
-        except Exception as e:
-            logger.warning(f"Ollama embedding API not available: {e}. Falling back to sentence-transformers.")
-        
+                    return self._normalize_embedding(embedding)
+                logger.warning("Ollama returned an empty embedding; trying sentence-transformers")
+            except (httpx.HTTPError, ValueError) as error:
+                logger.warning("Ollama embeddings unavailable: %s", error)
+
         # Fallback to sentence-transformers
         try:
-            from sentence_transformers import SentenceTransformer
-            
-            model = SentenceTransformer('all-MiniLM-L6-v2')  # Lightweight, fast model
+            model = self._get_fallback_model()
             embedding = model.encode(text, convert_to_numpy=True)
-            
-            # Normalize the embedding vector (L2 normalization)
-            import numpy as np
-            embedding_normalized = embedding / np.linalg.norm(embedding)
-            
-            return embedding_normalized.tolist()
-            
+
+            return self._normalize_embedding(embedding.tolist())
         except ImportError:
             logger.error("sentence-transformers not installed. Install with: pip install sentence-transformers")
             raise
         except Exception as e:
             logger.error(f"Failed to create embedding: {e}")
             raise ValueError(f"Could not create embedding: {e}")
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _get_fallback_model():
+        from sentence_transformers import SentenceTransformer
+
+        return SentenceTransformer("all-MiniLM-L6-v2")
+
+    @staticmethod
+    def _normalize_embedding(embedding: List[float]) -> List[float]:
+        values = np.asarray(embedding, dtype=float)
+        norm = np.linalg.norm(values)
+        if not np.isfinite(norm) or norm == 0:
+            raise ValueError("Embedding must contain finite, non-zero values")
+        return (values / norm).tolist()
     
     def search(
         self,
         query: str,
         n_results: int = 5,
         min_similarity: float = 0.5
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> List[Dict[str, Any]]:
         """
         Search for memories similar to the query using semantic similarity.
         
@@ -126,50 +123,42 @@ class VectorDatabase:
             List of matching memories with similarity scores, or None if no matches
         """
         try:
+            if self.collection.count() == 0:
+                return []
             # Get vector for query
             query_embedding = self.create_embedding(query)
             
-            # Query the collection
+            if n_results < 1:
+                raise ValueError("n_results must be greater than zero")
+
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=min(n_results, 10)  # Cap at 10 for performance
+                n_results=min(n_results, 10),
             )
-            
-            # Filter by minimum similarity
-            if not results or not results.get("distances") or not results.get("documents"):
-                logger.warning(f"No results found for query '{query}'")
-                return None
-            
+            if not results or not results.get("ids") or not results["ids"][0]:
+                return []
+
             distances = results["distances"][0]
             documents = results["documents"][0]
             metadatas = results["metadatas"][0]
-            
-            # Filter by similarity threshold
-            filtered_indices = [
-                i for i, dist in enumerate(distances) 
-                if dist <= min_similarity  # Lower distance = higher similarity
-            ]
-            
-            if not filtered_indices:
-                logger.debug(f"No results above threshold {min_similarity} for query '{query}'")
-                return None
-            
-            # Build result list
+            ids = results["ids"][0]
             memory_results = []
-            for idx in sorted(filtered_indices):
-                memory_results.append({
-                    "text": documents[idx],
-                    "score": 1.0 - distances[idx],  # Convert distance to similarity (0-1)
-                    "metadata": metadatas[idx] or {},
-                    "id": str(idx)  # Temporary ID, should use actual document ID in production
-                })
-            
-            logger.info(f"Found {len(memory_results)} memories for query '{query}'")
+            for memory_id, document, metadata, distance in zip(ids, documents, metadatas, distances):
+                # Chroma's L2 distance is squared; for unit vectors it equals 2 - 2*cosine.
+                score = max(0.0, min(1.0, 1.0 - distance / 2))
+                if score >= min_similarity:
+                    memory_results.append({
+                        "text": document,
+                        "score": score,
+                        "metadata": metadata or {},
+                        "id": memory_id,
+                    })
+
+            logger.info("Found %s memories for query", len(memory_results))
             return memory_results
-            
         except Exception as e:
             logger.error(f"Error searching memories: {e}")
-            return None
+            raise
     
     def add(
         self,
@@ -187,39 +176,27 @@ class VectorDatabase:
             documents: The actual text content
             metadatas: Optional metadata (category, timestamp, etc.)
         """
-        try:
-            if metadatas is None:
-                metadatas = [{"created_at": 0}] * len(ids)
-            
-            # Normalize embeddings to -1 to 1 range
-            normalized_embeddings = []
-            for emb in embeddings:
-                import numpy as np
-                emb_array = np.array(emb)
-                norm = np.linalg.norm(emb_array)
-                if norm > 0:
-                    normalized_embeddings.append((emb_array / norm * 2 - 1).tolist())
-                else:
-                    normalized_embeddings.append([0.0] * len(emb))
-            
-            self.collection.upsert(
-                ids=ids,
-                embeddings=normalized_embeddings,
-                documents=documents,
-                metadatas=metadatas
-            )
-            
-            logger.info(f"Added {len(ids)} memories to vector database")
-            
-        except Exception as e:
-            # Use upsert for idempotency - won't fail if document already exists
-            self.collection.upsert(
-                ids=ids,
-                embeddings=normalized_embeddings,
-                documents=documents,
-                metadatas=metadatas
-            )
-            logger.warning(f"Memory addition may have failed (using upsert): {e}")
+        if not (len(ids) == len(embeddings) == len(documents)):
+            raise ValueError("ids, embeddings, and documents must have equal lengths")
+        if metadatas is None:
+            metadatas = [{"created_at": 0}] * len(ids)
+        if len(metadatas) != len(ids):
+            raise ValueError("metadatas must match the number of ids")
+
+        self.collection.upsert(
+            ids=ids,
+            embeddings=[self._normalize_embedding(embedding) for embedding in embeddings],
+            documents=documents,
+            metadatas=metadatas,
+        )
+        logger.info("Added %s memories to vector database", len(ids))
+
+    def get(self, ids: Optional[List[str]] = None, include: Optional[List[str]] = None):
+        """Return memory records, optionally restricted to their IDs."""
+        options = {"include": include} if include is not None else {}
+        if ids is not None:
+            options["ids"] = ids
+        return self.collection.get(**options)
     
     def delete(self, ids: List[str]):
         """
@@ -228,8 +205,5 @@ class VectorDatabase:
         Args:
             ids: List of memory IDs to delete
         """
-        try:
-            self.collection.delete(ids=ids)
-            logger.info(f"Deleted {len(ids)} memories from vector database")
-        except Exception as e:
-            logger.error(f"Error deleting memories: {e}")
+        self.collection.delete(ids=ids)
+        logger.info("Deleted %s memories from vector database", len(ids))

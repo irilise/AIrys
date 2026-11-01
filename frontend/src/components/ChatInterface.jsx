@@ -1,140 +1,170 @@
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 
-/**
- * Chat Interface Component
- * Main conversational interface with message history and real-time streaming
- */
-function ChatInterface({ onServerReconnect }) {
+function ChatInterface({ serverStatus }) {
   const [messages, setMessages] = useState([])
   const [inputText, setInputText] = useState('')
-  const [isStreaming, setIsStreaming] = useState(false)
+  const [isSending, setIsSending] = useState(false)
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const messagesEndRef = useRef(null)
 
-  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    let active = true
+    axios.get('/api/v1/chat/history')
+      .then(({ data }) => {
+        if (active) {
+          setMessages((data.sessions || []).flatMap((exchange) => [
+            { role: 'user', content: exchange.user_message, timestamp: exchange.timestamp },
+            { role: 'assistant', content: exchange.response, timestamp: exchange.timestamp },
+          ]))
+        }
+      })
+      .catch(() => {
+        if (active) toast.error('Could not load saved conversation history.')
+      })
+      .finally(() => {
+        if (active) setIsLoadingHistory(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Check connection on mount
-  useEffect(() => {
-    const checkInterval = setInterval(checkServerConnection, 5000)
-    return () => clearInterval(checkInterval)
-  }, [])
-
-  const checkServerConnection = async () => {
-    try {
-      await axios.get('/api/v1/chat/health')
-      if (onServerReconnect) onServerReconnect()
-    } catch (error) {
-      console.error('Backend server is not responding')
-      toast.error('Backend server is not responding')
-    }
-  }
-
   const handleSendMessage = async () => {
-    if (!inputText.trim() || isStreaming) return
+    const message = inputText.trim()
+    if (!message || isSending || serverStatus !== 'connected') return
 
-    // Add user message to UI
-    setMessages(prev => [...prev, { role: 'user', content: inputText }])
+    setMessages((previous) => [...previous, {
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString(),
+    }])
     setInputText('')
-    setIsStreaming(true)
+    setIsSending(true)
 
     try {
-      const response = await axios.post('/api/v1/chat/complete', {
-        message: inputText,
-        context: null,
-        system_prompt: "You are AIrys, a friendly and helpful personal assistant. Be conversational, practical, and supportive."
-      })
-
-      setMessages(prev => [...prev, { role: 'assistant', content: response.data.response }])
+      const { data } = await axios.post('/api/v1/chat/complete', { message })
+      setMessages((previous) => [...previous, {
+        role: 'assistant',
+        content: data.response,
+        timestamp: new Date().toISOString(),
+      }])
     } catch (error) {
-      console.error('Error sending message:', error)
-      toast.error(error?.response?.data?.detail || 'Failed to connect to backend server.')
+      const detail = error?.response?.data?.detail || 'Failed to get a response from AIrys.'
+      toast.error(detail)
+      setMessages((previous) => [...previous, {
+        role: 'error',
+        content: detail,
+        timestamp: new Date().toISOString(),
+      }])
     } finally {
-      setIsStreaming(false)
+      setIsSending(false)
     }
   }
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
+  const handleClearHistory = async () => {
+    if (!window.confirm('Clear the saved conversation history?')) return
+    try {
+      await axios.delete('/api/v1/chat/history')
+      setMessages([])
+      toast.success('Conversation history cleared.')
+    } catch {
+      toast.error('Could not clear conversation history.')
+    }
+  }
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
       handleSendMessage()
     }
   }
 
   return (
-    <div className="chat-container h-screen lg:h-[calc(100vh-140px)] flex flex-col">
-      <div className="chat-messages flex flex-col flex-1 p-2 gap-2 overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500/50 scrollbar-track-transparent">
-        {messages.length === 0 ? (
+    <section className="chat-container h-[calc(100vh-7rem)] min-h-[30rem] flex flex-col">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <h2 className="text-lg font-semibold">Chat</h2>
+        <button
+          type="button"
+          onClick={handleClearHistory}
+          disabled={messages.length === 0 || isSending}
+          className="text-xs text-gray-300 hover:text-white disabled:opacity-40"
+        >
+          Clear history
+        </button>
+      </div>
+
+      <div className="chat-messages flex flex-col flex-1 p-4 gap-3 overflow-y-auto">
+        {isLoadingHistory ? (
+          <p className="text-center text-gray-400">Loading conversation...</p>
+        ) : messages.length === 0 ? (
           <div className="welcome-message text-center items-center justify-center min-h-[30vh]">
             <h2 className="text-3xl font-bold mb-4 gradient-text">Welcome to AIrys</h2>
-            <p className="text-lg text-gray-300 mb-6">Your personal AI assistant is ready to help!</p>
-            <div className="quick-prompts space-y-2 max-w-md mx-auto">
-              <p className="text-sm text-purple-200 font-medium">Try asking:</p>
-              <ul className="flex flex-wrap gap-2 justify-center">
-                <li className="px-3 py-1.5 rounded-full bg-primary-600/30 text-xs text-primary-200 border border-white/10">"What are some tasks I should remember?"</li>
-                <li className="px-3 py-1.5 rounded-full bg-primary-600/30 text-xs text-primary-200 border border-white/10">"Remind me to schedule a dentist appointment"</li>
-                <li className="px-3 py-1.5 rounded-full bg-primary-600/30 text-xs text-primary-200 border border-white/10">"What do you know about my preferences?"</li>
-              </ul>
-            </div>
+            <p className="text-lg text-gray-300 mb-6">Your personal AI assistant is ready to help.</p>
+            <p className="text-sm text-purple-200">Ask a question, plan your day, or share something you want AIrys to remember.</p>
           </div>
         ) : (
-          messages.map((msg, index) => (
-            <div key={index} className={`message items-start gap-2 p-3 rounded-xl ${msg.role === 'user' ? 'flex-row-reverse bg-primary-600/40' : 'bg-white/5'}`}>
-              {msg.role === 'user' && (
-                <>
-                  <span className="text-sm font-bold text-primary-400 w-16">You</span>
-                  <div className="flex-1 text-base leading-relaxed break-words">{msg.content}</div>
-                </>
-              )}
-              {msg.role === 'assistant' && (
-                <>
-                  <div className="flex-1 text-base leading-relaxed break-words">
-                    {msg.content.split('\n').map((line, i) => (
-                      <div key={i} className={line.startsWith('*') ? 'italic' : ''}>
-                        {line}
-                      </div>
-                    ))}
-                  </div>
-                  <span className="text-xs text-gray-500 mt-2">
-                    {new Date().toLocaleTimeString()}
-                  </span>
-                </>
-              )}
-              {msg.role === 'error' && (
-                <div className="flex-1 text-red-400 text-sm italic">⚠️ {msg.content}</div>
+          messages.map((message, index) => (
+            <div
+              key={`${message.timestamp}-${index}`}
+              className={`message items-start gap-3 p-3 rounded-xl ${
+                message.role === 'user'
+                  ? 'flex-row-reverse bg-primary-600/40'
+                  : message.role === 'error'
+                    ? 'bg-red-500/10'
+                    : 'bg-white/5'
+              }`}
+            >
+              <span className="text-xs font-semibold text-primary-300 shrink-0">
+                {message.role === 'user' ? 'You' : message.role === 'error' ? 'Error' : 'AIrys'}
+              </span>
+              <div className={`flex-1 text-sm leading-relaxed break-words whitespace-pre-wrap ${
+                message.role === 'error' ? 'text-red-300' : 'text-gray-100'
+              }`}>
+                {message.content}
+              </div>
+              {message.timestamp && (
+                <time className="text-xs text-gray-500 shrink-0">
+                  {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </time>
               )}
             </div>
           ))
         )}
+        {isSending && <p className="text-sm text-purple-200 px-3">AIrys is thinking...</p>}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="chat-input-area flex items-center gap-2 px-2 py-2 bg-black/30 border-t border-white/10">
+      <div className="chat-input-area flex items-center gap-2 px-4 py-3 bg-black/30 border-t border-white/10">
         <textarea
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Type your message..."
-          disabled={isStreaming || serverStatus === 'disconnected'}
-          rows={1}
-          className="flex-1 min-h-[56px] max-h-[150px] px-4 py-2 rounded-lg bg-white/5 border border-white/20 text-gray-100 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 resize-none"
+          onChange={(event) => setInputText(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={serverStatus === 'connected' ? 'Type your message...' : 'Connect to the backend to chat'}
+          disabled={isSending || serverStatus !== 'connected'}
+          rows={2}
+          className="flex-1 min-h-[56px] max-h-[150px] px-4 py-2 rounded-lg bg-white/5 border border-white/20 text-gray-100 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 resize-y"
         />
-        <button 
+        <button
+          type="button"
           onClick={handleSendMessage}
-          disabled={!inputText.trim() || isStreaming || serverStatus === 'disconnected'}
-          className={`px-4 py-2 rounded-lg transition-all duration-200 ${!inputText.trim() || isStreaming ? 'bg-gray-600/50 cursor-not-allowed' : 'primary-button hover:-translate-y-0.5 shadow-lg'}`}
+          disabled={!inputText.trim() || isSending || serverStatus !== 'connected'}
+          className="primary-button disabled:bg-gray-600/50 disabled:cursor-not-allowed"
+          aria-label="Send message"
         >
-          {isStreaming ? '⏳' : '📤'}
+          {isSending ? '...' : 'Send'}
         </button>
       </div>
-
-      <div className="text-center text-xs text-gray-500 px-2 py-1 bg-black/20">
-        Status: <span className={`inline-block w-20 text-center px-1.5 rounded-full ${serverStatus === 'connected' ? 'bg-emerald-500 text-slate-900' : 'bg-red-500 text-white'}`}>{serverStatus}</span>
+      <div className="text-center text-xs text-gray-500 px-2 py-2 bg-black/20">
+        Conversations are stored locally on this device.
       </div>
-    </div>
+    </section>
   )
 }
 

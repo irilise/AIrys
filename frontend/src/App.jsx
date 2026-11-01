@@ -1,74 +1,65 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
+import toast, { Toaster } from 'react-hot-toast'
+import ChatInterface from './components/ChatInterface'
+import MemoryPanel from './components/MemoryPanel'
+import SettingsModal from './components/SettingsModal'
 
-/**
- * AIrys Main Application
- * Desktop frontend for the personal AI assistant
- */
 function App() {
   const [serverStatus, setServerStatus] = useState('checking...')
   const [showSettings, setShowSettings] = useState(false)
+  const connectionLost = useRef(false)
 
-  // Check if backend server is running
   useEffect(() => {
-    checkServerConnection()
-  }, [])
+    let active = true
 
-  const checkServerConnection = async () => {
-    try {
-      await axios.get('/api/v1/chat/health')
-      setServerStatus('connected')
-    } catch (error) {
-      setServerStatus('disconnected')
-      console.error('Backend server is not responding')
-      // Show error notification using localStorage toast
-      const toasts = JSON.parse(localStorage.getItem('airys-toasts') || '[]')
-      toasts.push({ id: Date.now(), message: 'Backend server is not responding', type: 'error' })
-      localStorage.setItem('airys-toasts', JSON.stringify(toasts))
+    const checkServerConnection = async () => {
+      try {
+        await axios.get('/api/v1/chat/health')
+        if (active) {
+          setServerStatus('connected')
+          connectionLost.current = false
+        }
+      } catch {
+        if (active) {
+          setServerStatus('disconnected')
+          if (!connectionLost.current) toast.error('Backend server is not responding.')
+          connectionLost.current = true
+        }
+      }
     }
-  }
 
-  const handleSaveSettings = () => {
-    console.log('Saving settings:', arguments[0])
-    // Save to localStorage if needed
-    setShowSettings(false)
-    alert('Settings saved!')
-  }
+    checkServerConnection()
+    const intervalId = window.setInterval(checkServerConnection, 10000)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [])
 
   return (
     <div className="app-container">
-      {/* Toast Notifications */}
-      <div className="fixed top-4 right-4 z-50 space-y-2">
-        {JSON.parse(localStorage.getItem('airys-toasts') || '[]').map((toast, i) => (
-          <div key={toast.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
-            toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-slate-900'
-          }`} onClick={() => {
-            const toasts = JSON.parse(localStorage.getItem('airys-toasts') || '[]')
-            localStorage.setItem('airys-toasts', JSON.stringify(toasts.slice(1)))
-          }}>
-            {toast.message}
-          </div>
-        ))}
-      </div>
-
+      <Toaster position="top-right" />
       <header className="app-header">
         <h1 className="text-3xl font-bold gradient-text">AIrys</h1>
         <div className="header-controls">
           <span className={`server-status ${serverStatus} text-xs px-3 py-1 rounded-full`}>
             {serverStatus}
           </span>
-          <button onClick={() => setShowSettings(true)} className="px-4 py-2">⚙️ Settings</button>
+          <button onClick={() => setShowSettings(true)} className="px-4 py-2">
+            Settings
+          </button>
         </div>
       </header>
 
-      <main className="app-main p-4 max-w-6xl mx-auto flex-1">
-        {!showSettings ? (
-          <>
-            {serverStatus === 'connected' && <MemoryPanel />}
-            <ChatInterface onServerReconnect={checkServerConnection} />
-          </>
-        ) : (
+      <main className="app-main p-4 max-w-6xl mx-auto flex-1 w-full">
+        {showSettings ? (
           <SettingsModal onClose={() => setShowSettings(false)} />
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+            <ChatInterface serverStatus={serverStatus} />
+            <MemoryPanel />
+          </div>
         )}
       </main>
     </div>

@@ -1,16 +1,19 @@
-# Makefile for AIrys
-
-.PHONY: help install run-server run-frontend build clean
+.PHONY: help install run-server run-frontend start-all build lint test smoke-test smoke-frontend smoke-backend smoke-integration clean
 
 help:
 	@echo "AIrys Development Commands:"
-	@echo ""
-	@echo "  make install     - Install production dependencies"
-	@echo "  make run-server  - Start backend server"
-	@echo "  make run-frontend - Start frontend dev server"
-	@echo "  make start-all   - Start both servers"
-	@echo "  make clean       - Remove temporary files"
-	@echo "  make build       - Build frontend for production"
+	@echo "  make install      Install backend dependencies"
+	@echo "  make run-server   Start the backend server"
+	@echo "  make run-frontend Start the frontend dev server"
+	@echo "  make start-all    Start backend and frontend"
+	@echo "  make build        Build the frontend for production"
+	@echo "  make lint         Compile Python source files"
+	@echo "  make test         Run backend unit tests"
+	@echo "  make smoke-test   Smoke-test running frontend, backend, and Ollama chat"
+	@echo "  make smoke-frontend  Test the running frontend only"
+	@echo "  make smoke-backend   Test the running backend only"
+	@echo "  make smoke-integration Test frontend-to-backend chat with local Ollama"
+	@echo "  make clean        Remove Python cache files"
 
 install:
 	pip install -r requirements.txt
@@ -22,42 +25,29 @@ run-frontend:
 	cd frontend && npm run dev
 
 start-all:
-	@echo "Starting AIrys servers..."
-	pip install -r requirements.txt
 	python backend/server.py &
-	cd frontend && npm install --silent && npm run dev
-
-clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf dist build *.egg-info 2>/dev/null || true
-	cd frontend && rm -rf node_modules package-lock.json 2>/dev/null || true
+	cd frontend && npm run dev
 
 build:
 	cd frontend && npm run build
-# Start both frontend and backend servers
-start-all:
-	@echo "Starting AIrys servers..."
-	-mkosi build || true
-	pip install -r requirements.txt
-	python backend/server.py &
-	cd frontend && npm install --silent && npm run dev
 
-# Clean temporary files
-clean:
-	rm -rf __pycache__
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	cd frontend && npm run clean 2>/dev/null || true
-
-# Build frontend for production
-build:
-	cd frontend && npm run build
-
-# Run linter
 lint:
-	python -m py_compile backend/*.py backend/**/*.py
-	cd frontend && npm run lint 2>/dev/null || true
+	python -m compileall -q backend config tests
 
-# Run tests
 test:
-	pytest tests/ 2>/dev/null || echo "No pytest tests found"
+	python -m unittest discover -s tests -v
+
+smoke-test:
+	python tests/smoke_test.py --target all
+
+smoke-frontend:
+	python tests/smoke_test.py --target frontend
+
+smoke-backend:
+	python tests/smoke_test.py --target backend
+
+smoke-integration:
+	python tests/smoke_test.py --target integration
+
+clean:
+	find backend config tests -type d -name "__pycache__" -exec rm -rf {} +

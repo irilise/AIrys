@@ -1,68 +1,151 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import axios from 'axios'
+import toast from 'react-hot-toast'
 
-/**
- * Memory Panel Component
- * Shows retrieved memories/context for the current conversation
- */
 function MemoryPanel() {
   const [memories, setMemories] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [isSearching, setIsSearching] = useState(false)
+  const [content, setContent] = useState('')
+  const [category, setCategory] = useState('general')
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
-  // Search for relevant memories when query changes
-  useEffect(() => {
-    if (searchQuery.trim()) {
-      performMemorySearch()
-    } else {
-      setMemories([])
-    }
-  }, [searchQuery])
-
-  const performMemorySearch = async () => {
-    setIsSearching(true)
+  const loadMemories = async (query = '') => {
+    setIsLoading(true)
     try {
-      const response = await axios.get('/api/v1/memory/search', {
-        params: { query: searchQuery, n_results: 5, min_similarity: 0.6 }
-      })
-      setMemories(response.data.data || [])
+      const { data } = query.trim()
+        ? await axios.get('/api/v1/memory/search', {
+          params: { query: query.trim(), n_results: 10, min_similarity: 0.4 },
+        })
+        : await axios.get('/api/v1/memory/list', { params: { limit: 50 } })
+      setMemories(data.data || [])
     } catch (error) {
-      console.error('Error searching memories:', error)
+      toast.error(error?.response?.data?.detail || 'Could not load memories.')
     } finally {
-      setIsSearching(false)
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadMemories()
+  }, [])
+
+  const handleSearch = (event) => {
+    event.preventDefault()
+    loadMemories(searchQuery)
+  }
+
+  const handleSave = async (event) => {
+    event.preventDefault()
+    if (!content.trim() || isSaving) return
+    setIsSaving(true)
+    try {
+      await axios.post('/api/v1/memory/store', {
+        content: content.trim(),
+        category: category.trim() || 'general',
+      })
+      setContent('')
+      toast.success('Memory saved.')
+      await loadMemories(searchQuery)
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Could not save memory.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDelete = async (memoryId) => {
+    try {
+      await axios.delete(`/api/v1/memory/clear/${encodeURIComponent(memoryId)}`)
+      setMemories((previous) => previous.filter((memory) => memory.id !== memoryId))
+      toast.success('Memory deleted.')
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Could not delete memory.')
     }
   }
 
   return (
-    <div className="memory-panel h-[28rem] bg-black/20 backdrop-blur-sm rounded-xl p-4 mb-4 overflow-hidden">
-      <h3 className="text-lg font-bold text-primary-400 mb-3">🧠 Relevant Memories</h3>
-      
-      <input
-        type="text"
-        placeholder="Search your memories..."
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        onKeyPress={(e) => {
-          if (e.key === 'Enter') performMemorySearch()
-        }}
-        className="w-full px-3 py-2 mt-1 bg-white/5 border border-white/20 rounded-lg text-gray-100 focus:outline-none focus:border-primary-500 mb-3"
-      />
+    <aside className="memory-panel h-[calc(100vh-7rem)] min-h-[30rem] flex flex-col bg-black/20 backdrop-blur-sm rounded-xl p-4 overflow-hidden">
+      <h2 className="text-lg font-bold text-primary-400 mb-3">Saved memories</h2>
 
-      {isSearching && <p className="text-emerald-400 italic text-sm mb-3">Searching...</p>}
-
-      {memories.length === 0 ? (
-        <p className="text-gray-400">No matching memories found.</p>
-      ) : (
-        <div className="memory-list flex flex-col gap-2 max-h-[calc(28rem-65px)] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500/50">
-          {memories.map((memory, index) => (
-            <div key={index} className="bg-white/5 rounded-lg p-3 transition-all duration-200 hover:bg-primary-600/20 cursor-pointer" onClick={() => console.log(memory)}>
-              <p className="text-sm text-gray-200 mb-2">{memory.text}</p>
-              <span className="text-xs text-gray-500">Score: {(memory.score * 100).toFixed(0)}%</span>
-            </div>
-          ))}
+      <form onSubmit={handleSave} className="space-y-2 mb-4">
+        <label htmlFor="memory-content" className="sr-only">New memory</label>
+        <textarea
+          id="memory-content"
+          value={content}
+          onChange={(event) => setContent(event.target.value)}
+          maxLength={4096}
+          rows={3}
+          placeholder="Save a preference, fact, or reminder..."
+          className="w-full px-3 py-2 bg-white/5 border border-white/20 rounded-lg text-gray-100 focus:outline-none focus:border-primary-500 resize-y"
+        />
+        <div className="flex gap-2">
+          <label htmlFor="memory-category" className="sr-only">Memory category</label>
+          <input
+            id="memory-category"
+            type="text"
+            value={category}
+            maxLength={64}
+            onChange={(event) => setCategory(event.target.value)}
+            placeholder="Category"
+            className="min-w-0 flex-1 px-3 py-2 bg-white/5 border border-white/20 rounded-lg text-gray-100"
+          />
+          <button type="submit" disabled={!content.trim() || isSaving} className="primary-button disabled:opacity-50">
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
         </div>
-      )}
-    </div>
+      </form>
+
+      <form onSubmit={handleSearch} className="flex gap-2 mb-3">
+        <label htmlFor="memory-search" className="sr-only">Search memories</label>
+        <input
+          id="memory-search"
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search memories..."
+          className="min-w-0 flex-1 px-3 py-2 bg-white/5 border border-white/20 rounded-lg text-gray-100"
+        />
+        <button type="submit" className="bg-white/10 hover:bg-white/20">Search</button>
+        {searchQuery && (
+          <button type="button" onClick={() => { setSearchQuery(''); loadMemories() }} className="bg-white/10 hover:bg-white/20">
+            All
+          </button>
+        )}
+      </form>
+
+      <div className="flex-1 overflow-y-auto space-y-2">
+        {isLoading ? (
+          <p className="text-sm text-gray-400">Loading memories...</p>
+        ) : memories.length === 0 ? (
+          <p className="text-sm text-gray-400">
+            {searchQuery.trim() ? 'No matching memories found.' : 'No saved memories yet.'}
+          </p>
+        ) : (
+          memories.map((memory) => (
+            <article key={memory.id} className="bg-white/5 rounded-lg p-3">
+              <p className="text-sm text-gray-200 whitespace-pre-wrap break-words">{memory.text}</p>
+              <div className="flex items-center justify-between gap-2 mt-2">
+                <span className="text-xs text-gray-500">
+                  {memory.metadata?.category || 'general'}
+                  {typeof memory.score === 'number' && searchQuery.trim()
+                    ? ` · ${(memory.score * 100).toFixed(0)}% match`
+                    : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(memory.id)}
+                  className="text-xs text-red-300 hover:text-red-200"
+                  aria-label={`Delete memory: ${memory.text}`}
+                >
+                  Delete
+                </button>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+    </aside>
   )
 }
 

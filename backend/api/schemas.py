@@ -3,7 +3,7 @@ API Schemas for AIrys Backend
 Defines request/response models using Pydantic
 """
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 class ChatRequest(BaseModel):
@@ -13,6 +13,10 @@ class ChatRequest(BaseModel):
     system_prompt: Optional[str] = Field(
         "You are AIrys, a friendly and helpful personal assistant. Be conversational, practical, and supportive.",
         description="System prompt to guide the AI's behavior"
+    )
+    persist_history: bool = Field(
+        default=True,
+        description="Whether to save this exchange to the local conversation history",
     )
 
 
@@ -35,5 +39,11 @@ class MemoryItem(BaseModel):
 class MemoryResponse(BaseModel):
     """Response model for memory operations."""
     success: bool = Field(..., description="Whether operation succeeded")
-    data: Optional[List[MemoryItem]] = Field(None, description="Memory items if applicable")
+    data: Optional[Any] = Field(None, description="Operation result, if applicable")
     message: Optional[str] = Field(None, description="Success or error message")
+
+
+class MemoryCreate(BaseModel):
+    """Request model for creating a memory."""
+    content: str = Field(..., min_length=1, max_length=4096)
+    category: str = Field(default="general", min_length=1, max_length=64)
