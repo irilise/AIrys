@@ -27,6 +27,24 @@ class RuntimeConfigTests(unittest.TestCase):
                     loaded = app_config.get_runtime_config()
                 self.assertEqual(loaded, saved)
 
+    def test_default_host_is_not_pinned_by_saved_settings(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            with (
+                patch.object(app_config.settings, "DATA_DIR", data_dir),
+                patch.object(app_config.settings, "OLLAMA_HOST", "http://host.docker.internal:11434"),
+                patch.object(app_config, "_runtime_config", None),
+            ):
+                app_config.update_runtime_config(RuntimeConfig(
+                    ollama_host="http://host.docker.internal:11434",
+                    ollama_model="llama3.2",
+                ))
+            with (
+                patch.object(app_config.settings, "DATA_DIR", data_dir),
+                patch.object(app_config.settings, "OLLAMA_HOST", "http://localhost:11434"),
+                patch.object(app_config, "_runtime_config", None),
+            ):
+                self.assertEqual(app_config.get_runtime_config().ollama_host, "http://localhost:11434")
+
     def test_rejects_host_credentials_and_invalid_inference_values(self):
         with self.assertRaises(ValidationError):
             RuntimeConfig(ollama_host="http://user:pass@localhost:11434", ollama_model="model")

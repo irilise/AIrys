@@ -23,6 +23,16 @@ def get_databases():
     )
 
 
+async def _installed_models(host: str) -> list[str]:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{host}/api/tags")
+            response.raise_for_status()
+            return [m["name"] for m in response.json().get("models", [])]
+    except Exception:
+        return []
+
+
 @router.post("/complete", response_model=ChatResponse)
 async def complete_chat(request: ChatRequest):
     """Generate a reply grounded in recent conversation and relevant memories."""
@@ -87,11 +97,23 @@ async def complete_chat(request: ChatRequest):
         )
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as error:
+        logger.warning("Ollama returned an error: %s", error)
+        if error.response.status_code == 404:
+            installed = await _installed_models(config.ollama_host)
+            detail = (
+                f"Model '{config.ollama_model}' was not found on Ollama. "
+                f"Pull it with 'ollama pull {config.ollama_model}' or choose an installed model in Settings"
+                + (f" (installed: {', '.join(installed[:8])})." if installed else ".")
+            )
+        else:
+            detail = f"Ollama returned HTTP {error.response.status_code}."
+        raise HTTPException(status_code=502, detail=detail) from error
     except httpx.HTTPError as error:
         logger.warning("Ollama request failed: %s", error)
         raise HTTPException(
             status_code=503,
-            detail="Could not reach Ollama. Check the configured host and ensure the model is available.",
+            detail=f"Could not reach Ollama at {config.ollama_host}. Check that it is running and the host is correct.",
         ) from error
     except Exception as error:
         logger.exception("Could not complete chat request")

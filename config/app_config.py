@@ -132,9 +132,11 @@ def get_runtime_config() -> RuntimeConfig:
         config_path = _runtime_config_path()
         if config_path.exists():
             try:
-                _runtime_config = RuntimeConfig.model_validate_json(
-                    config_path.read_text(encoding="utf-8")
-                )
+                saved = json.loads(config_path.read_text(encoding="utf-8"))
+                # The host is only persisted when overridden, so each environment
+                # (host vs. Docker) keeps using its own OLLAMA_HOST by default.
+                saved.setdefault("ollama_host", settings.OLLAMA_HOST)
+                _runtime_config = RuntimeConfig.model_validate(saved)
             except Exception as error:
                 logger.exception("Could not load persisted runtime settings")
                 raise RuntimeError(f"Invalid runtime settings in {config_path}") from error
@@ -154,8 +156,11 @@ def update_runtime_config(config: RuntimeConfig) -> RuntimeConfig:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = config_path.with_suffix(".json.tmp")
         try:
+            persisted = config.model_dump()
+            if persisted["ollama_host"] == settings.OLLAMA_HOST.rstrip("/"):
+                del persisted["ollama_host"]
             temporary_path.write_text(
-                json.dumps(config.model_dump(), indent=2),
+                json.dumps(persisted, indent=2),
                 encoding="utf-8",
             )
             os.replace(temporary_path, config_path)
